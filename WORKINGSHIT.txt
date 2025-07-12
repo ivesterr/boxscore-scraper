@@ -1,0 +1,961 @@
+import customtkinter as ctk
+from tkinter import messagebox
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options as ChromeOptions
+from selenium.webdriver.chrome.service import Service as ChromeService
+from selenium.webdriver.firefox.options import Options as FirefoxOptions
+from selenium.webdriver.firefox.service import Service as FirefoxService
+from selenium.webdriver.edge.options import Options as EdgeOptions
+from selenium.webdriver.edge.service import Service as EdgeService
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
+from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.firefox import GeckoDriverManager
+from webdriver_manager.microsoft import EdgeChromiumDriverManager
+from bs4 import BeautifulSoup
+import time
+import re
+import threading
+import random
+import sys
+from PIL import Image
+import os
+import concurrent.futures
+from queue import Queue
+
+# Set the appearance mode and color theme
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("dark-blue")
+
+class BasketballBoxScoreScraper:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Basketball Box Score Scraper")
+        self.root.geometry("1200x800")
+        self.root.configure(bg="#06072e")
+        
+        # NBA Teams
+        self.nba_teams = {
+            'Atlanta Hawks': 'ATL',
+            'Boston Celtics': 'BOS',
+            'Brooklyn Nets': 'BRK',
+            'Charlotte Hornets': 'CHO',
+            'Chicago Bulls': 'CHI',
+            'Cleveland Cavaliers': 'CLE',
+            'Dallas Mavericks': 'DAL',
+            'Denver Nuggets': 'DEN',
+            'Detroit Pistons': 'DET',
+            'Golden State Warriors': 'GSW',
+            'Houston Rockets': 'HOU',
+            'Indiana Pacers': 'IND',
+            'LA Clippers': 'LAC',
+            'Los Angeles Lakers': 'LAL',
+            'Memphis Grizzlies': 'MEM',
+            'Miami Heat': 'MIA',
+            'Milwaukee Bucks': 'MIL',
+            'Minnesota Timberwolves': 'MIN',
+            'New Orleans Pelicans': 'NOP',
+            'New York Knicks': 'NYK',
+            'Oklahoma City Thunder': 'OKC',
+            'Orlando Magic': 'ORL',
+            'Philadelphia 76ers': 'PHI',
+            'Phoenix Suns': 'PHX',
+            'Portland Trail Blazers': 'POR',
+            'Sacramento Kings': 'SAC',
+            'San Antonio Spurs': 'SAS',
+            'Toronto Raptors': 'TOR',
+            'Utah Jazz': 'UTA',
+            'Washington Wizards': 'WAS'
+        }
+        
+        # WNBA Teams
+        self.wnba_teams = {
+            'Atlanta Dream': 'ATL',
+            'Chicago Sky': 'CHI',
+            'Connecticut Sun': 'CON',
+            'Dallas Wings': 'DAL',
+            'Golden State Valkyries': 'GSV',
+            'Indiana Fever': 'IND',
+            'Las Vegas Aces': 'LVA',
+            'Los Angeles Sparks': 'LAS',
+            'Minnesota Lynx': 'MIN',
+            'New York Liberty': 'NYL',
+            'Phoenix Mercury': 'PHX',
+            'Seattle Storm': 'SEA',
+            'Washington Mystics': 'WAS'
+        }
+        
+        self.all_teams = {**self.nba_teams, **self.wnba_teams}
+        self.selected_league = "NBA"  # Default selection
+        self.selected_browser = "Chrome"  # Default browser
+        self.log_queue = Queue()  # Thread-safe logging
+        self.lebron_image_label = None  # Store reference to image label
+        self.setup_ui()
+        
+    def on_league_change(self, league):
+        """Handle league selection change"""
+        self.selected_league = league
+        
+        # Update button appearances
+        if league == "NBA":
+            self.nba_button.configure(fg_color="#FFFFFF", text_color="#06072e")
+            self.wnba_button.configure(fg_color=("#3D316E", "#72618E"), text_color="#FFFFFF")
+            teams = list(self.nba_teams.keys())
+        else:
+            self.wnba_button.configure(fg_color="#FFFFFF", text_color="#06072e")
+            self.nba_button.configure(fg_color=("#3D316E", "#72618E"), text_color="#FFFFFF")
+            teams = list(self.wnba_teams.keys())
+        
+        # Update team dropdowns
+        self.team1_combo.configure(values=teams)
+        self.team2_combo.configure(values=teams)
+        
+        # Clear current selections
+        self.team1_combo.set("")
+        self.team2_combo.set("")
+        
+    def on_browser_change(self, browser):
+        """Handle browser selection change"""
+        self.selected_browser = browser
+        self.log(f"Selected browser: {browser}")
+        
+        # Update button appearances
+        browsers = ["Chrome", "Firefox", "Edge"]
+        for btn_browser in browsers:
+            button = getattr(self, f"{btn_browser.lower()}_button")
+            if btn_browser == browser:
+                button.configure(fg_color="#FFFFFF", text_color="#06072e")
+            else:
+                button.configure(fg_color=("#3D316E", "#72618E"), text_color="#FFFFFF")
+        
+        # Update LeBron image based on browser selection
+        self.update_lebron_image()
+        
+    def setup_ui(self):
+        # Create scrollable frame
+        self.scrollable_frame = ctk.CTkScrollableFrame(self.root, fg_color="#06072e")
+        self.scrollable_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # Main container frame (now inside scrollable frame)
+        main_frame = ctk.CTkFrame(self.scrollable_frame, fg_color="#06072e")
+        main_frame.pack(fill="both", expand=True)
+        
+        # League selection frame
+        league_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        league_frame.pack(pady=10)
+        
+        league_label = ctk.CTkLabel(
+            league_frame, 
+            text="Select League:", 
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color="#FFFFFF"
+        )
+        league_label.pack(pady=(0, 10))
+        
+        # League buttons frame
+        league_buttons_frame = ctk.CTkFrame(league_frame, fg_color="transparent")
+        league_buttons_frame.pack()
+        
+        self.nba_button = ctk.CTkButton(
+            league_buttons_frame,
+            text="NBA",
+            width=100,
+            height=40,
+            corner_radius=20,
+            fg_color="#FFFFFF",
+            text_color="#06072e",
+            hover_color="#FFFFFF",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            command=lambda: self.on_league_change("NBA")
+        )
+        self.nba_button.pack(side="left", padx=(0, 10))
+        
+        self.wnba_button = ctk.CTkButton(
+            league_buttons_frame,
+            text="WNBA",
+            width=100,
+            height=40,
+            corner_radius=20,
+            fg_color=("#3D316E", "#72618E"),
+            text_color="#FFFFFF",
+            hover_color="#FFFFFF",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            command=lambda: self.on_league_change("WNBA")
+        )
+        self.wnba_button.pack(side="left")
+        
+        # Browser selection frame
+        browser_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        browser_frame.pack(pady=10)
+        
+        browser_label = ctk.CTkLabel(
+            browser_frame, 
+            text="Select Browser:", 
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color="#FFFFFF"
+        )
+        browser_label.pack(pady=(0, 10))
+        
+        # Browser buttons frame
+        browser_buttons_frame = ctk.CTkFrame(browser_frame, fg_color="transparent")
+        browser_buttons_frame.pack()
+        
+        self.chrome_button = ctk.CTkButton(
+            browser_buttons_frame,
+            text="Chrome",
+            width=80,
+            height=35,
+            corner_radius=15,
+            fg_color="#FFFFFF",
+            text_color="#06072e",
+            hover_color="#FFFFFF",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            command=lambda: self.on_browser_change("Chrome")
+        )
+        self.chrome_button.pack(side="left", padx=(0, 5))
+        
+        self.firefox_button = ctk.CTkButton(
+            browser_buttons_frame,
+            text="Firefox",
+            width=80,
+            height=35,
+            corner_radius=15,
+            fg_color=("#3D316E", "#72618E"),
+            text_color="#FFFFFF",
+            hover_color="#FFFFFF",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            command=lambda: self.on_browser_change("Firefox")
+        )
+        self.firefox_button.pack(side="left", padx=5)
+        
+        self.edge_button = ctk.CTkButton(
+            browser_buttons_frame,
+            text="Edge/Opera GX",
+            width=110,
+            height=35,
+            corner_radius=15,
+            fg_color=("#3D316E", "#72618E"),
+            text_color="#FFFFFF",
+            hover_color="#FFFFFF",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=lambda: self.on_browser_change("Edge")
+        )
+        self.edge_button.pack(side="left", padx=(5, 0))
+        
+        # Single centered LeBron image
+        self.load_lebron_image(main_frame)
+        
+        # Form section - Teams
+        form_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        form_frame.pack(pady=20)
+        
+        # Teams container - horizontal layout
+        teams_frame = ctk.CTkFrame(form_frame, fg_color="transparent")
+        teams_frame.pack(pady=(0, 15))
+        
+        # Team 1 selection
+        team1_frame = ctk.CTkFrame(teams_frame, fg_color="transparent")
+        team1_frame.pack(side="left", padx=(0, 20))
+        
+        team1_label = ctk.CTkLabel(
+            team1_frame, 
+            text="Team 1:", 
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color="#FFFFFF"
+        )
+        team1_label.pack(pady=(0, 5))
+        
+        self.team1_combo = ctk.CTkComboBox(
+            team1_frame,
+            values=list(self.nba_teams.keys()),
+            width=250,
+            font=ctk.CTkFont(size=12)
+        )
+        self.team1_combo.pack()
+        
+        # Team 2 selection
+        team2_frame = ctk.CTkFrame(teams_frame, fg_color="transparent")
+        team2_frame.pack(side="right", padx=(20, 0))
+        
+        team2_label = ctk.CTkLabel(
+            team2_frame, 
+            text="Team 2:", 
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color="#FFFFFF"
+        )
+        team2_label.pack(pady=(0, 5))
+        
+        self.team2_combo = ctk.CTkComboBox(
+            team2_frame,
+            values=list(self.nba_teams.keys()),
+            width=250,
+            font=ctk.CTkFont(size=12)
+        )
+        self.team2_combo.pack()
+        
+        # Season year
+        season_label = ctk.CTkLabel(
+            form_frame, 
+            text="Season Year:", 
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color="#FFFFFF"
+        )
+        season_label.pack(pady=(0, 5))
+        
+        self.season_entry = ctk.CTkEntry(
+            form_frame,
+            width=100,
+            font=ctk.CTkFont(size=12)
+        )
+        self.season_entry.insert(0, "2025")
+        self.season_entry.pack(pady=(0, 20))
+        
+        # Main action button
+        self.get_data_btn = ctk.CTkButton(
+            main_frame,
+            text="Get Last 5 Games",
+            width=200,
+            height=40,
+            corner_radius=20,
+            fg_color=("#3D316E", "#72618E"),
+            text_color="#FFFFFF",
+            hover_color="#FFFFFF",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            command=self.get_data_threaded
+        )
+        self.get_data_btn.pack(pady=20)
+        
+        # Progress indicator
+        self.progress_label = ctk.CTkLabel(
+            main_frame,
+            text="",
+            font=ctk.CTkFont(size=12),
+            text_color="#FFFFFF"
+        )
+        self.progress_label.pack(pady=(0, 10))
+        
+        # Results section - Box scores side by side
+        results_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        results_frame.pack(fill="both", expand=True, pady=10)
+        
+        # Box scores container
+        box_scores_frame = ctk.CTkFrame(results_frame, fg_color="transparent")
+        box_scores_frame.pack(fill="both", expand=True)
+        
+        # Team 1 results
+        team1_results_frame = ctk.CTkFrame(box_scores_frame, fg_color="transparent")
+        team1_results_frame.pack(side="left", fill="both", expand=True, padx=(0, 5))
+        
+        team1_label = ctk.CTkLabel(
+            team1_results_frame, 
+            text="Team 1 Box Scores:", 
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color="#FFFFFF"
+        )
+        team1_label.pack(pady=(0, 5))
+        
+        self.team1_text = ctk.CTkTextbox(
+            team1_results_frame,
+            height=300,
+            fg_color="#1e1f4d",
+            text_color="#FFFFFF",
+            font=ctk.CTkFont(size=10)
+        )
+        self.team1_text.pack(fill="both", expand=True)
+        
+        # Team 2 results
+        team2_results_frame = ctk.CTkFrame(box_scores_frame, fg_color="transparent")
+        team2_results_frame.pack(side="right", fill="both", expand=True, padx=(5, 0))
+        
+        team2_label = ctk.CTkLabel(
+            team2_results_frame, 
+            text="Team 2 Box Scores:", 
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color="#FFFFFF"
+        )
+        team2_label.pack(pady=(0, 5))
+        
+        self.team2_text = ctk.CTkTextbox(
+            team2_results_frame,
+            height=300,
+            fg_color="#1e1f4d",
+            text_color="#FFFFFF",
+            font=ctk.CTkFont(size=10)
+        )
+        self.team2_text.pack(fill="both", expand=True)
+        
+        # Log section - Full width underneath
+        log_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        log_frame.pack(fill="x", pady=(15, 0))
+        
+        log_label = ctk.CTkLabel(
+            log_frame, 
+            text="Log:", 
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color="#FFFFFF"
+        )
+        log_label.pack(pady=(0, 5))
+        
+        self.log_text = ctk.CTkTextbox(
+            log_frame,
+            height=120,
+            fg_color="#2c2d59",
+            text_color="#FFFFFF",
+            font=ctk.CTkFont(size=10)
+        )
+        self.log_text.pack(fill="x")
+        
+        # Start log queue processor
+        self.process_log_queue()
+        
+    def load_lebron_image(self, parent_frame):
+        """Load and display centered LeBron image scaled to 75%"""
+        try:
+            # Determine image filename based on selected browser
+            if self.selected_browser == "Chrome":
+                image_filename = "lebron_chrome.png"
+            elif self.selected_browser == "Firefox":
+                image_filename = "lebron_firefox.png"
+            elif self.selected_browser == "Edge":
+                image_filename = "lebron_operaedge.png"
+            else:
+                image_filename = "lebron_chrome.png"  # Default fallback
+            
+            # Get the correct path for both development and PyInstaller bundle
+            if hasattr(sys, '_MEIPASS'):
+                # Running as PyInstaller bundle
+                image_path = os.path.join(sys._MEIPASS, image_filename)
+            else:
+                # Running as script
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                image_path = os.path.join(script_dir, image_filename)
+            
+            if os.path.exists(image_path):
+                # Load and resize image to 75% (522x394 -> 391x295)
+                pil_image = Image.open(image_path)
+                resized_image = pil_image.resize((391, 295), Image.Resampling.LANCZOS)
+                
+                # Convert to CTkImage
+                ctk_image = ctk.CTkImage(
+                    light_image=resized_image,
+                    dark_image=resized_image,
+                    size=(391, 295)
+                )
+                
+                # Create centered image label
+                self.lebron_image_label = ctk.CTkLabel(
+                    parent_frame,
+                    image=ctk_image,
+                    text=""
+                )
+                self.lebron_image_label.pack(pady=10)
+                
+            else:
+                self.log(f"{image_filename} not found at {image_path}")
+                
+        except Exception as e:
+            self.log(f"Error loading LeBron image: {str(e)}")
+    
+    def update_lebron_image(self):
+        """Update LeBron image based on current browser selection"""
+        if self.lebron_image_label is None:
+            return
+            
+        try:
+            # Determine image filename based on selected browser
+            if self.selected_browser == "Chrome":
+                image_filename = "lebron_chrome.png"
+            elif self.selected_browser == "Firefox":
+                image_filename = "lebron_firefox.png"
+            elif self.selected_browser == "Edge":
+                image_filename = "lebron_operaedge.png"
+            else:
+                image_filename = "lebron_chrome.png"  # Default fallback
+            
+            # Get the correct path for both development and PyInstaller bundle
+            if hasattr(sys, '_MEIPASS'):
+                # Running as PyInstaller bundle
+                image_path = os.path.join(sys._MEIPASS, image_filename)
+            else:
+                # Running as script
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                image_path = os.path.join(script_dir, image_filename)
+            
+            if os.path.exists(image_path):
+                # Load and resize image to 75% (522x394 -> 391x295)
+                pil_image = Image.open(image_path)
+                resized_image = pil_image.resize((391, 295), Image.Resampling.LANCZOS)
+                
+                # Convert to CTkImage
+                ctk_image = ctk.CTkImage(
+                    light_image=resized_image,
+                    dark_image=resized_image,
+                    size=(391, 295)
+                )
+                
+                # Update the existing label with new image
+                self.lebron_image_label.configure(image=ctk_image)
+                
+            else:
+                self.log(f"{image_filename} not found at {image_path}")
+                
+        except Exception as e:
+            self.log(f"Error updating LeBron image: {str(e)}")
+        
+    def log(self, message):
+        """Thread-safe logging method"""
+        self.log_queue.put(message)
+        
+    def process_log_queue(self):
+        """Process log messages from the queue (runs on main thread)"""
+        try:
+            while True:
+                message = self.log_queue.get_nowait()
+                self.log_text.insert("end", f"{message}\n")
+                self.log_text.see("end")
+        except:
+            pass
+        
+        # Schedule next check
+        self.root.after(100, self.process_log_queue)
+        
+    def update_progress(self, text):
+        """Update progress label"""
+        self.progress_label.configure(text=text)
+        self.root.update_idletasks()
+        
+    def get_data_threaded(self):
+        """Run data collection in a separate thread to prevent GUI freezing"""
+        thread = threading.Thread(target=self.get_data)
+        thread.daemon = True
+        thread.start()
+        
+    def get_data(self):
+        """Main function to get box score data with optimized sequential processing"""
+        try:
+            # Clear previous results
+            self.team1_text.delete("1.0", "end")
+            self.team2_text.delete("1.0", "end")
+            self.log_text.delete("1.0", "end")
+            self.update_progress("Initializing...")
+            
+            # Validate inputs
+            team1 = self.team1_combo.get()
+            team2 = self.team2_combo.get()
+            season = self.season_entry.get()
+            league = self.selected_league
+            
+            if not league:
+                messagebox.showerror("Error", "Please select a league")
+                return
+                
+            if not team1 or not team2 or not season:
+                messagebox.showerror("Error", "Please select both teams and enter a season year")
+                return
+                
+            if team1 == team2:
+                messagebox.showerror("Error", "Please select different teams")
+                return
+                
+            # Disable button during processing
+            self.get_data_btn.configure(state='disabled')
+            
+            # Process teams sequentially but with optimized settings
+            for i, team in enumerate([team1, team2], 1):
+                self.update_progress(f"Processing team {i}/2: {team}")
+                self.log(f"Processing {team}...")
+                
+                # Small delay between teams to prevent overwhelming the server
+                if i > 1:
+                    self.log("Brief pause before processing next team...")
+                    time.sleep(2)
+                    
+                team_name, box_scores = self.get_team_box_scores(team, season, i)
+                
+                text_widget = self.team1_text if i == 1 else self.team2_text
+                if box_scores:
+                    text_widget.insert("end", box_scores)
+                    self.log(f"✓ Successfully retrieved box scores for {team}")
+                else:
+                    text_widget.insert("end", f"No box scores found for {team}")
+                    self.log(f"⚠ No box scores found for {team}")
+                    
+            self.update_progress("Completed! Both teams processed.")
+            self.log("🎉 All processing complete!")
+                    
+        except Exception as e:
+            self.log(f"❌ Error: {str(e)}")
+            messagebox.showerror("Error", f"An error occurred: {str(e)}")
+            self.update_progress("Error occurred")
+        finally:
+            # Re-enable button
+            self.get_data_btn.configure(state='normal')
+            
+    def create_driver(self):
+        """Create a webdriver based on selected browser with optimized options"""
+        try:
+            if self.selected_browser == "Chrome":
+                return self.create_chrome_driver()
+            elif self.selected_browser == "Firefox":
+                return self.create_firefox_driver()
+            elif self.selected_browser == "Edge":
+                return self.create_edge_driver()
+            else:
+                self.log(f"Unknown browser: {self.selected_browser}, defaulting to Chrome")
+                return self.create_chrome_driver()
+        except Exception as e:
+            self.log(f"Error creating {self.selected_browser} driver: {str(e)}")
+            # Fallback to Chrome if selected browser fails
+            if self.selected_browser != "Chrome":
+                self.log("Falling back to Chrome driver...")
+                return self.create_chrome_driver()
+            raise
+    
+    def create_chrome_driver(self):
+        """Create Chrome driver with optimized options for speed and stability"""
+        chrome_options = ChromeOptions()
+        chrome_options.add_argument('--headless')
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--disable-gpu')
+        chrome_options.add_argument('--window-size=1920,1080')
+        chrome_options.add_argument('--disable-logging')
+        chrome_options.add_argument('--disable-extensions')
+        chrome_options.add_argument('--disable-web-security')
+        chrome_options.add_argument('--allow-running-insecure-content')
+        chrome_options.add_argument('--log-level=3')
+        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+        chrome_options.add_argument('--disable-features=VizDisplayCompositor')
+        
+        # Enhanced stability options for parallel processing
+        chrome_options.add_argument('--no-first-run')
+        chrome_options.add_argument('--no-default-browser-check')
+        chrome_options.add_argument('--disable-default-apps')
+        chrome_options.add_argument('--disable-background-timer-throttling')
+        chrome_options.add_argument('--disable-backgrounding-occluded-windows')
+        chrome_options.add_argument('--disable-renderer-backgrounding')
+        chrome_options.add_argument('--disable-features=TranslateUI')
+        chrome_options.add_argument('--remote-debugging-port=0')  # Use random port
+        
+        # Memory and performance optimizations
+        chrome_options.add_argument('--max_old_space_size=2048')  # Reduced memory usage
+        chrome_options.add_argument('--memory-pressure-off')
+        chrome_options.add_argument('--max-connections-per-host=6')  # Reduced connections
+        
+        # Additional speed optimizations
+        chrome_options.add_argument('--disable-images')  # Don't load images
+        chrome_options.add_argument('--disable-javascript')  # Disable JS (if not needed)
+        chrome_options.add_argument('--disable-plugins')
+        chrome_options.add_argument('--disable-java')
+        chrome_options.add_argument('--disable-notifications')
+        chrome_options.add_argument('--disable-popup-blocking')
+        chrome_options.add_argument('--aggressive-cache-discard')
+        
+        # Rotate user agents to avoid detection
+        user_agents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        ]
+        chrome_options.add_argument(f'--user-agent={random.choice(user_agents)}')
+        
+        chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
+        
+        # Create service with increased timeout
+        service = ChromeService(ChromeDriverManager().install())
+        
+        return webdriver.Chrome(service=service, options=chrome_options)
+    
+    def create_firefox_driver(self):
+        """Create Firefox driver with optimized options for speed"""
+        firefox_options = FirefoxOptions()
+        firefox_options.add_argument('--headless')
+        firefox_options.add_argument('--no-sandbox')
+        firefox_options.add_argument('--disable-dev-shm-usage')
+        firefox_options.add_argument('--disable-gpu')
+        firefox_options.add_argument('--window-size=1920,1080')
+        
+        # Firefox-specific preferences for speed
+        firefox_options.set_preference("general.useragent.override", 
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0")
+        firefox_options.set_preference("dom.webdriver.enabled", False)
+        firefox_options.set_preference("useAutomationExtension", False)
+        firefox_options.set_preference("browser.privatebrowsing.autostart", True)
+        
+        # Speed optimizations
+        firefox_options.set_preference("permissions.default.image", 2)  # Block images
+        firefox_options.set_preference("javascript.enabled", False)  # Disable JavaScript
+        firefox_options.set_preference("browser.cache.disk.enable", False)
+        firefox_options.set_preference("browser.cache.memory.enable", False)
+        firefox_options.set_preference("browser.cache.offline.enable", False)
+        firefox_options.set_preference("network.http.use-cache", False)
+        
+        return webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()), options=firefox_options)
+    
+    def create_edge_driver(self):
+        """Create Edge driver with optimized options for speed"""
+        edge_options = EdgeOptions()
+        edge_options.add_argument('--headless')
+        edge_options.add_argument('--no-sandbox')
+        edge_options.add_argument('--disable-dev-shm-usage')
+        edge_options.add_argument('--disable-gpu')
+        edge_options.add_argument('--window-size=1920,1080')
+        edge_options.add_argument('--disable-logging')
+        edge_options.add_argument('--disable-extensions')
+        edge_options.add_argument('--disable-web-security')
+        edge_options.add_argument('--allow-running-insecure-content')
+        edge_options.add_argument('--log-level=3')
+        edge_options.add_argument('--disable-blink-features=AutomationControlled')
+        
+        # Speed optimizations
+        edge_options.add_argument('--disable-images')
+        edge_options.add_argument('--disable-javascript')
+        edge_options.add_argument('--disable-plugins')
+        edge_options.add_argument('--disable-java')
+        edge_options.add_argument('--disable-notifications')
+        
+        # Edge user agent
+        edge_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36 Edg/91.0.864.59')
+        
+        edge_options.add_experimental_option('excludeSwitches', ['enable-logging'])
+        edge_options.add_experimental_option('useAutomationExtension', False)
+        
+        return webdriver.Edge(service=EdgeService(EdgeChromiumDriverManager().install()), options=edge_options)
+            
+    def get_team_box_scores(self, team_name, season, team_number):
+        """Get last 5 box scores for a team using optimized parallel processing"""
+        # Determine league and get team code
+        if team_name in self.nba_teams:
+            team_code = self.nba_teams[team_name]
+            league = 'nba'
+        elif team_name in self.wnba_teams:
+            team_code = self.wnba_teams[team_name]
+            league = 'wnba'
+        else:
+            self.log(f"Team {team_name} not found in any league")
+            return team_name, ""
+        
+        driver = None
+        max_retries = 2  # Reduced retries for speed
+        
+        for attempt in range(max_retries):
+            try:
+                self.log(f"[Team {team_number}] Attempt {attempt + 1}/{max_retries} for {team_name}")
+                
+                # Create fresh driver for each attempt
+                driver = self.create_driver()
+                driver.set_page_load_timeout(25)  # Increased timeout
+                driver.implicitly_wait(8)  # Increased wait
+                
+                # Get schedule page
+                schedule_url = f"https://www.basketball-reference.com/{league}/teams/{team_code}/{season}_games.html"
+                self.log(f"[Team {team_number}] Loading schedule: {schedule_url}")
+                
+                driver.get(schedule_url)
+                
+                # Wait for page to load with increased timeout
+                try:
+                    WebDriverWait(driver, 20).until(
+                        EC.presence_of_element_located((By.TAG_NAME, "body"))
+                    )
+                    time.sleep(2)  # Back to longer wait
+                except TimeoutException:
+                    self.log(f"[Team {team_number}] Timeout waiting for page to load on attempt {attempt + 1}")
+                    if attempt < max_retries - 1:
+                        if driver:
+                            driver.quit()
+                        time.sleep(5)  # Longer wait before retry
+                        continue
+                    else:
+                        raise
+                
+                # Get page source and parse with BeautifulSoup
+                soup = BeautifulSoup(driver.page_source, 'html.parser')
+                
+                # Find box score links
+                box_score_links = self.extract_box_score_links(soup)
+                
+                if not box_score_links:
+                    self.log(f"[Team {team_number}] No box score links found for {team_name}")
+                    if driver:
+                        driver.quit()
+                    return team_name, ""
+                    
+                # Get last 5 games
+                recent_links = box_score_links[-5:]
+                self.log(f"[Team {team_number}] Found {len(recent_links)} recent games for {team_name}")
+                
+                # Process games sequentially with optimized settings
+                all_box_scores = self.process_games_sequential(driver, recent_links, team_name, team_code, team_number)
+                
+                # Success - return results
+                if driver:
+                    driver.quit()
+                return team_name, "\n\n".join(all_box_scores)
+                
+            except (TimeoutException, WebDriverException) as e:
+                self.log(f"[Team {team_number}] Driver error on attempt {attempt + 1}: {str(e)}")
+                if driver:
+                    try:
+                        driver.quit()
+                    except:
+                        pass
+                    driver = None
+                
+                if attempt < max_retries - 1:
+                    self.log(f"[Team {team_number}] Retrying in 5 seconds...")
+                    time.sleep(5)
+                else:
+                    self.log(f"[Team {team_number}] Failed after {max_retries} attempts")
+                    return team_name, ""
+                    
+            except Exception as e:
+                self.log(f"[Team {team_number}] Unexpected error on attempt {attempt + 1}: {str(e)}")
+                if driver:
+                    try:
+                        driver.quit()
+                    except:
+                        pass
+                    driver = None
+                
+                if attempt < max_retries - 1:
+                    self.log(f"[Team {team_number}] Retrying in 5 seconds...")
+                    time.sleep(5)
+                else:
+                    self.log(f"[Team {team_number}] Failed after {max_retries} attempts")
+                    return team_name, ""
+        
+        return team_name, ""
+    
+    def process_games_sequential(self, driver, recent_links, team_name, team_code, team_number):
+        """Process individual games sequentially with optimized settings"""
+        all_box_scores = []
+        
+        for i, link in enumerate(recent_links, 1):
+            self.log(f"[Team {team_number}] Processing game {i}/5")
+            box_score_url = f"https://www.basketball-reference.com{link}"
+            
+            # Retry logic for individual games
+            game_max_retries = 2
+            game_success = False
+            
+            for game_attempt in range(game_max_retries):
+                try:
+                    if game_attempt > 0:
+                        self.log(f"[Team {team_number}] Retrying game {i}, attempt {game_attempt + 1}/{game_max_retries}")
+                    
+                    # Moderate delay between requests
+                    time.sleep(random.uniform(1, 2))
+                    
+                    # Navigate to box score page
+                    driver.get(box_score_url)
+                    WebDriverWait(driver, 25).until(
+                        EC.presence_of_element_located((By.TAG_NAME, "body"))
+                    )
+                    time.sleep(2)  # Wait for content to load
+                    
+                    box_score_soup = BeautifulSoup(driver.page_source, 'html.parser')
+                    box_score_data = self.extract_box_score_data(box_score_soup, team_name, team_code)
+                    
+                    if box_score_data:
+                        all_box_scores.append(box_score_data)
+                        self.log(f"[Team {team_number}] ✓ Successfully processed game {i}")
+                        game_success = True
+                        break  # Success, exit retry loop
+                    else:
+                        self.log(f"[Team {team_number}] No data found for game {i} on attempt {game_attempt + 1}")
+                        if game_attempt < game_max_retries - 1:
+                            time.sleep(3)  # Wait before retry
+                            
+                except Exception as e:
+                    self.log(f"[Team {team_number}] Error processing game {i}, attempt {game_attempt + 1}: {str(e)}")
+                    if game_attempt < game_max_retries - 1:
+                        time.sleep(3)  # Wait before retry
+                    else:
+                        self.log(f"[Team {team_number}] Failed to process game {i} after {game_max_retries} attempts")
+            
+            if not game_success:
+                self.log(f"[Team {team_number}] ⚠ Skipping game {i} after all retry attempts failed")
+        
+        return all_box_scores
+                
+    def extract_box_score_links(self, soup):
+        """Extract box score links from schedule page - optimized"""
+        links = []
+        
+        # More targeted search for box score links
+        schedule_table = soup.find('table', {'id': 'games'})
+        if schedule_table:
+            for link in schedule_table.find_all('a', href=True):
+                href = link.get('href')
+                if href and '/boxscores/' in href and href.endswith('.html'):
+                    links.append(href)
+        else:
+            # Fallback to original method
+            for link in soup.find_all('a', href=True):
+                href = link.get('href')
+                if href and '/boxscores/' in href and href.endswith('.html'):
+                    links.append(href)
+                    
+        return links
+        
+    def extract_box_score_data(self, soup, team_name, team_code):
+        """Extract box score data from a game page - optimized"""
+        try:
+            # Find the team's box score table with multiple attempts
+            possible_table_ids = [
+                f"box-{team_code}-game-basic",
+                f"box_{team_code}_basic",
+                f"box-{team_code.lower()}-game-basic",
+                f"box_{team_code.lower()}_basic"
+            ]
+            
+            table = None
+            for table_id in possible_table_ids:
+                table = soup.find('table', {'id': table_id})
+                if table:
+                    break
+                    
+            if not table:
+                # Try finding any table with the team code
+                for table_elem in soup.find_all('table'):
+                    if table_elem.get('id') and team_code.lower() in table_elem.get('id').lower():
+                        table = table_elem
+                        break
+                        
+            if not table:
+                return ""
+                
+            # Extract table data more efficiently
+            rows = table.find_all('tr')
+            if not rows:
+                return ""
+                
+            # Build output more efficiently
+            output_lines = [f"{team_name} Basic Box Score Stats"]
+            
+            for row in rows:
+                cells = row.find_all(['th', 'td'])
+                if cells:
+                    # Extract text more efficiently
+                    cell_texts = [cell.get_text(strip=True) for cell in cells]
+                    
+                    if cell_texts and any(cell_texts):  # Skip empty rows
+                        output_lines.append('\t'.join(cell_texts))
+                        
+            return '\n'.join(output_lines)
+            
+        except Exception as e:
+            self.log(f"Error extracting box score data: {str(e)}")
+            return ""
+
+def main():
+    root = ctk.CTk()
+    app = BasketballBoxScoreScraper(root)
+    root.mainloop()
+
+if __name__ == "__main__":
+    main()
