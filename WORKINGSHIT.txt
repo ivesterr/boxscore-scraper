@@ -24,15 +24,24 @@ from PIL import Image
 import os
 import concurrent.futures
 from queue import Queue
+import requests
+from urllib.parse import urljoin
+import asyncio
+import aiohttp
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+import lxml
+from functools import lru_cache
+import gc
 
 # Set the appearance mode and color theme
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
 
-class BasketballBoxScoreScraper:
+class UltraFastBasketballScraper:
     def __init__(self, root):
         self.root = root
-        self.root.title("Basketball Box Score Scraper")
+        self.root.title("Basketball Box Score Scraper - ULTRA FAST")
         self.root.geometry("1200x800")
         self.root.configure(bg="#06072e")
         
@@ -88,11 +97,51 @@ class BasketballBoxScoreScraper:
         }
         
         self.all_teams = {**self.nba_teams, **self.wnba_teams}
-        self.selected_league = "NBA"  # Default selection
-        self.selected_browser = "Chrome"  # Default browser
-        self.log_queue = Queue()  # Thread-safe logging
-        self.lebron_image_label = None  # Store reference to image label
+        self.selected_league = "NBA"
+        self.selected_browser = "Chrome"
+        self.log_queue = Queue()
+        self.lebron_image_label = None
+        
+        # Ultra-fast optimization variables
+        self.session = None
+        self.driver_pool = []
+        self.use_requests_fallback = True
+        self.cache = {}
+        
+        # Initialize high-performance session
+        self.init_ultra_fast_session()
         self.setup_ui()
+        
+    def init_ultra_fast_session(self):
+        """Initialize ultra-fast requests session with connection pooling"""
+        self.session = requests.Session()
+        
+        # Ultra-aggressive retry strategy
+        retry_strategy = Retry(
+            total=2,
+            backoff_factor=0.1,
+            status_forcelist=[429, 500, 502, 503, 504],
+        )
+        
+        adapter = HTTPAdapter(
+            max_retries=retry_strategy,
+            pool_connections=10,
+            pool_maxsize=20,
+            pool_block=False
+        )
+        
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+        
+        # Ultra-fast headers
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+        })
         
     def on_league_change(self, league):
         """Handle league selection change"""
@@ -244,6 +293,17 @@ class BasketballBoxScoreScraper:
         )
         self.edge_button.pack(side="left", padx=(5, 0))
         
+        # Ultra Fast Mode Toggle
+        self.ultra_fast_var = ctk.BooleanVar(value=True)
+        self.ultra_fast_checkbox = ctk.CTkCheckBox(
+            main_frame,
+            text="🚀 ULTRA FAST MODE (Uses Requests instead of Browser)",
+            variable=self.ultra_fast_var,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#00FF00"
+        )
+        self.ultra_fast_checkbox.pack(pady=10)
+        
         # Single centered LeBron image
         self.load_lebron_image(main_frame)
         
@@ -315,13 +375,13 @@ class BasketballBoxScoreScraper:
         # Main action button
         self.get_data_btn = ctk.CTkButton(
             main_frame,
-            text="Get Last 5 Games",
+            text="⚡ GET LAST 5 GAMES ⚡",
             width=200,
             height=40,
             corner_radius=20,
-            fg_color=("#3D316E", "#72618E"),
+            fg_color=("#FF6600", "#FF8800"),
             text_color="#FFFFFF",
-            hover_color="#FFFFFF",
+            hover_color="#FF4400",
             font=ctk.CTkFont(size=14, weight="bold"),
             command=self.get_data_threaded
         )
@@ -332,7 +392,7 @@ class BasketballBoxScoreScraper:
             main_frame,
             text="",
             font=ctk.CTkFont(size=12),
-            text_color="#FFFFFF"
+            text_color="#00FF00"
         )
         self.progress_label.pack(pady=(0, 10))
         
@@ -392,9 +452,9 @@ class BasketballBoxScoreScraper:
         
         log_label = ctk.CTkLabel(
             log_frame, 
-            text="Log:", 
+            text="🚀 Ultra Fast Log:", 
             font=ctk.CTkFont(size=14, weight="bold"),
-            text_color="#FFFFFF"
+            text_color="#00FF00"
         )
         log_label.pack(pady=(0, 5))
         
@@ -402,7 +462,7 @@ class BasketballBoxScoreScraper:
             log_frame,
             height=120,
             fg_color="#2c2d59",
-            text_color="#FFFFFF",
+            text_color="#00FF00",
             font=ctk.CTkFont(size=10)
         )
         self.log_text.pack(fill="x")
@@ -519,7 +579,7 @@ class BasketballBoxScoreScraper:
             pass
         
         # Schedule next check
-        self.root.after(100, self.process_log_queue)
+        self.root.after(50, self.process_log_queue)  # Faster log updates
         
     def update_progress(self, text):
         """Update progress label"""
@@ -533,13 +593,14 @@ class BasketballBoxScoreScraper:
         thread.start()
         
     def get_data(self):
-        """Main function to get box score data with optimized sequential processing"""
+        """ULTRA FAST main function with hybrid approach"""
+        start_time = time.time()
         try:
             # Clear previous results
             self.team1_text.delete("1.0", "end")
             self.team2_text.delete("1.0", "end")
             self.log_text.delete("1.0", "end")
-            self.update_progress("Initializing...")
+            self.update_progress("🚀 ULTRA FAST MODE INITIALIZING...")
             
             # Validate inputs
             team1 = self.team1_combo.get()
@@ -562,28 +623,52 @@ class BasketballBoxScoreScraper:
             # Disable button during processing
             self.get_data_btn.configure(state='disabled')
             
-            # Process teams sequentially but with optimized settings
-            for i, team in enumerate([team1, team2], 1):
-                self.update_progress(f"Processing team {i}/2: {team}")
-                self.log(f"Processing {team}...")
+            if self.ultra_fast_var.get():
+                # ULTRA FAST MODE: Use async requests + parallel processing
+                self.log("🚀 ULTRA FAST MODE ACTIVATED!")
+                self.log("⚡ Using parallel async requests for maximum speed...")
                 
-                # Small delay between teams to prevent overwhelming the server
-                if i > 1:
-                    self.log("Brief pause before processing next team...")
-                    time.sleep(2)
+                # Run both teams in parallel using async
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                    future1 = executor.submit(self.ultra_fast_get_team_data, team1, season, 1)
+                    future2 = executor.submit(self.ultra_fast_get_team_data, team2, season, 2)
                     
-                team_name, box_scores = self.get_team_box_scores(team, season, i)
-                
-                text_widget = self.team1_text if i == 1 else self.team2_text
-                if box_scores:
-                    text_widget.insert("end", box_scores)
-                    self.log(f"✓ Successfully retrieved box scores for {team}")
-                else:
-                    text_widget.insert("end", f"No box scores found for {team}")
-                    self.log(f"⚠ No box scores found for {team}")
+                    # Process results as they complete
+                    for future in concurrent.futures.as_completed([future1, future2]):
+                        team_name, box_scores = future.result()
+                        
+                        if team_name == team1:
+                            text_widget = self.team1_text
+                        else:
+                            text_widget = self.team2_text
+                            
+                        if box_scores:
+                            text_widget.insert("end", box_scores)
+                            self.log(f"⚡ ULTRA FAST SUCCESS for {team_name}")
+                        else:
+                            text_widget.insert("end", f"No box scores found for {team_name}")
+                            self.log(f"⚠ No data found for {team_name}")
+            else:
+                # Fallback to optimized browser mode
+                self.log("🌐 Using optimized browser mode...")
+                for i, team in enumerate([team1, team2], 1):
+                    self.update_progress(f"Processing team {i}/2: {team}")
+                    team_name, box_scores = self.get_team_box_scores(team, season, i)
                     
-            self.update_progress("Completed! Both teams processed.")
-            self.log("🎉 All processing complete!")
+                    text_widget = self.team1_text if i == 1 else self.team2_text
+                    if box_scores:
+                        text_widget.insert("end", box_scores)
+                        self.log(f"✓ Successfully retrieved box scores for {team}")
+                    else:
+                        text_widget.insert("end", f"No box scores found for {team}")
+                        self.log(f"⚠ No box scores found for {team}")
+                        
+            elapsed_time = time.time() - start_time
+            self.update_progress(f"🎉 COMPLETED IN {elapsed_time:.1f} SECONDS!")
+            self.log(f"🏁 TOTAL TIME: {elapsed_time:.1f} seconds - ULTRA FAST!")
+            
+            # Cleanup
+            gc.collect()
                     
         except Exception as e:
             self.log(f"❌ Error: {str(e)}")
@@ -592,141 +677,314 @@ class BasketballBoxScoreScraper:
         finally:
             # Re-enable button
             self.get_data_btn.configure(state='normal')
+    
+    @lru_cache(maxsize=100)
+    def ultra_fast_get_team_data(self, team_name, season, team_number):
+        """ULTRA FAST data retrieval using pure requests"""
+        try:
+            # Determine league and get team code
+            if team_name in self.nba_teams:
+                team_code = self.nba_teams[team_name]
+                league = 'nba'
+            elif team_name in self.wnba_teams:
+                team_code = self.wnba_teams[team_name]
+                league = 'wnba'
+            else:
+                self.log(f"Team {team_name} not found")
+                return team_name, ""
+            
+            self.log(f"[ULTRA-{team_number}] ⚡ Starting {team_name}")
+            
+            # Step 1: Get schedule page ULTRA FAST
+            schedule_url = f"https://www.basketball-reference.com/{league}/teams/{team_code}/{season}_games.html"
+            
+            response = self.session.get(schedule_url, timeout=10)
+            response.raise_for_status()
+            
+            # Step 2: Parse with lxml (fastest parser)
+            soup = BeautifulSoup(response.content, 'lxml')
+            
+            # Step 3: Extract box score links ULTRA FAST
+            box_score_links = self.ultra_fast_extract_links(soup)
+            
+            if not box_score_links:
+                self.log(f"[ULTRA-{team_number}] No links found for {team_name}")
+                return team_name, ""
+            
+            # Get last 5 games
+            recent_links = box_score_links[-5:]
+            self.log(f"[ULTRA-{team_number}] Found {len(recent_links)} games")
+            
+            # Step 4: Process games in parallel with requests
+            all_box_scores = []
+            
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                futures = []
+                for i, link in enumerate(recent_links, 1):
+                    box_score_url = f"https://www.basketball-reference.com{link}"
+                    future = executor.submit(self.ultra_fast_get_game_data, box_score_url, team_name, team_code, i, team_number)
+                    futures.append(future)
+                
+                # Collect results as they complete
+                for future in concurrent.futures.as_completed(futures):
+                    try:
+                        game_data = future.result(timeout=15)
+                        if game_data:
+                            all_box_scores.append(game_data)
+                    except Exception as e:
+                        self.log(f"[ULTRA-{team_number}] Game error: {str(e)[:50]}...")
+            
+            self.log(f"[ULTRA-{team_number}] ✅ Completed {team_name}")
+            return team_name, "\n\n".join(all_box_scores)
+            
+        except Exception as e:
+            self.log(f"[ULTRA-{team_number}] ❌ Error for {team_name}: {str(e)[:50]}...")
+            # Fallback to browser mode for this team
+            return self.get_team_box_scores(team_name, season, team_number)
+    
+    def ultra_fast_get_game_data(self, url, team_name, team_code, game_num, team_number):
+        """Get individual game data ULTRA FAST"""
+        try:
+            # Ultra-fast request with minimal timeout
+            response = self.session.get(url, timeout=8)
+            response.raise_for_status()
+            
+            # Parse with lxml for maximum speed
+            soup = BeautifulSoup(response.content, 'lxml')
+            
+            # Extract data super fast
+            return self.ultra_fast_extract_box_score(soup, team_name, team_code)
+            
+        except Exception as e:
+            self.log(f"[ULTRA-{team_number}] Game {game_num} failed: {str(e)[:30]}...")
+            return ""
+    
+    def ultra_fast_extract_links(self, soup):
+        """Extract box score links ULTRA FAST"""
+        links = []
+        
+        # Multiple strategies for maximum speed
+        strategies = [
+            lambda: soup.select('a[href*="/boxscores/"]'),
+            lambda: soup.find_all('a', href=re.compile(r'/boxscores/.*\.html')),
+            lambda: [a for a in soup.find_all('a', href=True) if '/boxscores/' in a.get('href', '')]
+        ]
+        
+        for strategy in strategies:
+            try:
+                elements = strategy()
+                if elements:
+                    links = [elem.get('href') for elem in elements if elem.get('href')]
+                    break
+            except:
+                continue
+                
+        return list(set(links))  # Remove duplicates
+    
+    def ultra_fast_extract_box_score(self, soup, team_name, team_code):
+        """Extract box score data ULTRA FAST"""
+        try:
+            # Multiple table ID strategies for speed
+            table_ids = [
+                f"box-{team_code}-game-basic",
+                f"box_{team_code}_basic",
+                f"box-{team_code.lower()}-game-basic",
+                f"box_{team_code.lower()}_basic"
+            ]
+            
+            table = None
+            for table_id in table_ids:
+                table = soup.find('table', id=table_id)
+                if table:
+                    break
+            
+            if not table:
+                # Fallback: find any table with team code
+                for t in soup.find_all('table'):
+                    if t.get('id') and team_code.lower() in t.get('id').lower():
+                        table = t
+                        break
+            
+            if not table:
+                return ""
+            
+            # Ultra-fast data extraction
+            rows = table.find_all('tr')
+            if not rows:
+                return ""
+            
+            # Build output super efficiently
+            lines = [f"{team_name} Basic Box Score Stats"]
+            
+            for row in rows:
+                cells = row.find_all(['th', 'td'])
+                if cells:
+                    cell_texts = [cell.get_text(strip=True) for cell in cells]
+                    if any(cell_texts):
+                        lines.append('\t'.join(cell_texts))
+            
+            return '\n'.join(lines)
+            
+        except Exception as e:
+            return ""
             
     def create_driver(self):
-        """Create a webdriver based on selected browser with optimized options"""
+        """Create ultra-optimized webdriver for fallback"""
         try:
             if self.selected_browser == "Chrome":
-                return self.create_chrome_driver()
+                return self.create_ultra_chrome_driver()
             elif self.selected_browser == "Firefox":
-                return self.create_firefox_driver()
+                return self.create_ultra_firefox_driver()
             elif self.selected_browser == "Edge":
-                return self.create_edge_driver()
+                return self.create_ultra_edge_driver()
             else:
-                self.log(f"Unknown browser: {self.selected_browser}, defaulting to Chrome")
-                return self.create_chrome_driver()
+                return self.create_ultra_chrome_driver()
         except Exception as e:
-            self.log(f"Error creating {self.selected_browser} driver: {str(e)}")
-            # Fallback to Chrome if selected browser fails
-            if self.selected_browser != "Chrome":
-                self.log("Falling back to Chrome driver...")
-                return self.create_chrome_driver()
+            self.log(f"Driver creation error: {str(e)}")
             raise
     
-    def create_chrome_driver(self):
-        """Create Chrome driver with optimized options for speed and stability"""
+    def create_ultra_chrome_driver(self):
+        """Create ULTRA optimized Chrome driver"""
         chrome_options = ChromeOptions()
-        chrome_options.add_argument('--headless')
-        chrome_options.add_argument('--no-sandbox')
-        chrome_options.add_argument('--disable-dev-shm-usage')
-        chrome_options.add_argument('--disable-gpu')
-        chrome_options.add_argument('--window-size=1920,1080')
-        chrome_options.add_argument('--disable-logging')
-        chrome_options.add_argument('--disable-extensions')
-        chrome_options.add_argument('--disable-web-security')
-        chrome_options.add_argument('--allow-running-insecure-content')
-        chrome_options.add_argument('--log-level=3')
-        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-        chrome_options.add_argument('--disable-features=VizDisplayCompositor')
         
-        # Enhanced stability options for parallel processing
-        chrome_options.add_argument('--no-first-run')
-        chrome_options.add_argument('--no-default-browser-check')
-        chrome_options.add_argument('--disable-default-apps')
-        chrome_options.add_argument('--disable-background-timer-throttling')
-        chrome_options.add_argument('--disable-backgrounding-occluded-windows')
-        chrome_options.add_argument('--disable-renderer-backgrounding')
-        chrome_options.add_argument('--disable-features=TranslateUI')
-        chrome_options.add_argument('--remote-debugging-port=0')  # Use random port
-        
-        # Memory and performance optimizations
-        chrome_options.add_argument('--max_old_space_size=2048')  # Reduced memory usage
-        chrome_options.add_argument('--memory-pressure-off')
-        chrome_options.add_argument('--max-connections-per-host=6')  # Reduced connections
-        
-        # Additional speed optimizations
-        chrome_options.add_argument('--disable-images')  # Don't load images
-        chrome_options.add_argument('--disable-javascript')  # Disable JS (if not needed)
-        chrome_options.add_argument('--disable-plugins')
-        chrome_options.add_argument('--disable-java')
-        chrome_options.add_argument('--disable-notifications')
-        chrome_options.add_argument('--disable-popup-blocking')
-        chrome_options.add_argument('--aggressive-cache-discard')
-        
-        # Rotate user agents to avoid detection
-        user_agents = [
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        # Ultra-aggressive options for maximum speed
+        ultra_args = [
+            '--headless=new',  # New headless mode
+            '--no-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--disable-features=VizDisplayCompositor',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding',
+            '--disable-web-security',
+            '--disable-features=TranslateUI',
+            '--disable-extensions',
+            '--disable-component-extensions-with-background-pages',
+            '--disable-default-apps',
+            '--disable-plugins',
+            '--disable-images',
+            '--disable-javascript',
+            '--disable-java',
+            '--disable-notifications',
+            '--disable-popup-blocking',
+            '--disable-background-networking',
+            '--disable-sync',
+            '--disable-translate',
+            '--hide-scrollbars',
+            '--mute-audio',
+            '--no-first-run',
+            '--disable-logging',
+            '--disable-gpu-logging',
+            '--silent',
+            '--log-level=3',
+            '--window-size=1920,1080',
+            '--user-data-dir=/tmp/chrome-ultra-fast',
+            '--aggressive-cache-discard',
+            '--memory-pressure-off',
+            '--max_old_space_size=1024',
+            '--remote-debugging-port=0',
+            '--disable-dev-tools',
+            '--disable-background-mode',
+            '--disable-client-side-phishing-detection',
+            '--disable-component-update',
+            '--disable-hang-monitor',
+            '--disable-prompt-on-repost',
+            '--disable-domain-reliability',
+            '--disable-features=AudioServiceOutOfProcess',
+            '--blink-settings=imagesEnabled=false',
+            '--disable-ipc-flooding-protection'
         ]
-        chrome_options.add_argument(f'--user-agent={random.choice(user_agents)}')
         
-        chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
+        for arg in ultra_args:
+            chrome_options.add_argument(arg)
+        
+        # Ultra-fast experimental options
+        chrome_options.add_experimental_option('excludeSwitches', ['enable-automation', 'enable-logging'])
         chrome_options.add_experimental_option('useAutomationExtension', False)
+        chrome_options.add_experimental_option('detach', True)
         
-        # Create service with increased timeout
-        service = ChromeService(ChromeDriverManager().install())
+        # Ultra-fast prefs
+        prefs = {
+            'profile.default_content_setting_values': {
+                'images': 2,
+                'plugins': 2,
+                'popups': 2,
+                'geolocation': 2,
+                'notifications': 2,
+                'media_stream': 2,
+            },
+            'profile.managed_default_content_settings': {
+                'images': 2
+            }
+        }
+        chrome_options.add_experimental_option('prefs', prefs)
         
-        return webdriver.Chrome(service=service, options=chrome_options)
+        return webdriver.Chrome(
+            service=ChromeService(ChromeDriverManager().install()),
+            options=chrome_options
+        )
     
-    def create_firefox_driver(self):
-        """Create Firefox driver with optimized options for speed"""
+    def create_ultra_firefox_driver(self):
+        """Create ULTRA optimized Firefox driver"""
         firefox_options = FirefoxOptions()
         firefox_options.add_argument('--headless')
-        firefox_options.add_argument('--no-sandbox')
-        firefox_options.add_argument('--disable-dev-shm-usage')
-        firefox_options.add_argument('--disable-gpu')
-        firefox_options.add_argument('--window-size=1920,1080')
         
-        # Firefox-specific preferences for speed
-        firefox_options.set_preference("general.useragent.override", 
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0")
-        firefox_options.set_preference("dom.webdriver.enabled", False)
-        firefox_options.set_preference("useAutomationExtension", False)
-        firefox_options.set_preference("browser.privatebrowsing.autostart", True)
+        # Ultra-fast Firefox preferences
+        ultra_prefs = {
+            'permissions.default.image': 2,
+            'javascript.enabled': False,
+            'browser.cache.disk.enable': False,
+            'browser.cache.memory.enable': False,
+            'browser.cache.offline.enable': False,
+            'network.http.use-cache': False,
+            'media.autoplay.enabled': False,
+            'media.autoplay.default': 5,
+            'browser.privatebrowsing.autostart': True,
+            'dom.webdriver.enabled': False,
+            'useAutomationExtension': False,
+        }
         
-        # Speed optimizations
-        firefox_options.set_preference("permissions.default.image", 2)  # Block images
-        firefox_options.set_preference("javascript.enabled", False)  # Disable JavaScript
-        firefox_options.set_preference("browser.cache.disk.enable", False)
-        firefox_options.set_preference("browser.cache.memory.enable", False)
-        firefox_options.set_preference("browser.cache.offline.enable", False)
-        firefox_options.set_preference("network.http.use-cache", False)
+        for pref, value in ultra_prefs.items():
+            firefox_options.set_preference(pref, value)
         
-        return webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()), options=firefox_options)
+        return webdriver.Firefox(
+            service=FirefoxService(GeckoDriverManager().install()),
+            options=firefox_options
+        )
     
-    def create_edge_driver(self):
-        """Create Edge driver with optimized options for speed"""
+    def create_ultra_edge_driver(self):
+        """Create ULTRA optimized Edge driver"""
         edge_options = EdgeOptions()
-        edge_options.add_argument('--headless')
-        edge_options.add_argument('--no-sandbox')
-        edge_options.add_argument('--disable-dev-shm-usage')
-        edge_options.add_argument('--disable-gpu')
-        edge_options.add_argument('--window-size=1920,1080')
-        edge_options.add_argument('--disable-logging')
-        edge_options.add_argument('--disable-extensions')
-        edge_options.add_argument('--disable-web-security')
-        edge_options.add_argument('--allow-running-insecure-content')
-        edge_options.add_argument('--log-level=3')
-        edge_options.add_argument('--disable-blink-features=AutomationControlled')
         
-        # Speed optimizations
-        edge_options.add_argument('--disable-images')
-        edge_options.add_argument('--disable-javascript')
-        edge_options.add_argument('--disable-plugins')
-        edge_options.add_argument('--disable-java')
-        edge_options.add_argument('--disable-notifications')
+        # Similar ultra-aggressive options as Chrome
+        ultra_args = [
+            '--headless=new',
+            '--no-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--disable-images',
+            '--disable-javascript',
+            '--disable-plugins',
+            '--disable-extensions',
+            '--aggressive-cache-discard',
+            '--memory-pressure-off',
+            '--remote-debugging-port=0'
+        ]
         
-        # Edge user agent
-        edge_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36 Edg/91.0.864.59')
+        for arg in ultra_args:
+            edge_options.add_argument(arg)
         
         edge_options.add_experimental_option('excludeSwitches', ['enable-logging'])
         edge_options.add_experimental_option('useAutomationExtension', False)
         
-        return webdriver.Edge(service=EdgeService(EdgeChromiumDriverManager().install()), options=edge_options)
-            
+        return webdriver.Edge(
+            service=EdgeService(EdgeChromiumDriverManager().install()),
+            options=edge_options
+        )
+    
     def get_team_box_scores(self, team_name, season, team_number):
-        """Get last 5 box scores for a team using optimized parallel processing"""
+        """Fallback browser method with optimizations"""
         # Determine league and get team code
         if team_name in self.nba_teams:
             team_code = self.nba_teams[team_name]
@@ -739,222 +997,69 @@ class BasketballBoxScoreScraper:
             return team_name, ""
         
         driver = None
-        max_retries = 2  # Reduced retries for speed
-        
-        for attempt in range(max_retries):
-            try:
-                self.log(f"[Team {team_number}] Attempt {attempt + 1}/{max_retries} for {team_name}")
-                
-                # Create fresh driver for each attempt
-                driver = self.create_driver()
-                driver.set_page_load_timeout(25)  # Increased timeout
-                driver.implicitly_wait(8)  # Increased wait
-                
-                # Get schedule page
-                schedule_url = f"https://www.basketball-reference.com/{league}/teams/{team_code}/{season}_games.html"
-                self.log(f"[Team {team_number}] Loading schedule: {schedule_url}")
-                
-                driver.get(schedule_url)
-                
-                # Wait for page to load with increased timeout
-                try:
-                    WebDriverWait(driver, 20).until(
-                        EC.presence_of_element_located((By.TAG_NAME, "body"))
-                    )
-                    time.sleep(2)  # Back to longer wait
-                except TimeoutException:
-                    self.log(f"[Team {team_number}] Timeout waiting for page to load on attempt {attempt + 1}")
-                    if attempt < max_retries - 1:
-                        if driver:
-                            driver.quit()
-                        time.sleep(5)  # Longer wait before retry
-                        continue
-                    else:
-                        raise
-                
-                # Get page source and parse with BeautifulSoup
-                soup = BeautifulSoup(driver.page_source, 'html.parser')
-                
-                # Find box score links
-                box_score_links = self.extract_box_score_links(soup)
-                
-                if not box_score_links:
-                    self.log(f"[Team {team_number}] No box score links found for {team_name}")
-                    if driver:
-                        driver.quit()
-                    return team_name, ""
-                    
-                # Get last 5 games
-                recent_links = box_score_links[-5:]
-                self.log(f"[Team {team_number}] Found {len(recent_links)} recent games for {team_name}")
-                
-                # Process games sequentially with optimized settings
-                all_box_scores = self.process_games_sequential(driver, recent_links, team_name, team_code, team_number)
-                
-                # Success - return results
-                if driver:
-                    driver.quit()
-                return team_name, "\n\n".join(all_box_scores)
-                
-            except (TimeoutException, WebDriverException) as e:
-                self.log(f"[Team {team_number}] Driver error on attempt {attempt + 1}: {str(e)}")
-                if driver:
-                    try:
-                        driver.quit()
-                    except:
-                        pass
-                    driver = None
-                
-                if attempt < max_retries - 1:
-                    self.log(f"[Team {team_number}] Retrying in 5 seconds...")
-                    time.sleep(5)
-                else:
-                    self.log(f"[Team {team_number}] Failed after {max_retries} attempts")
-                    return team_name, ""
-                    
-            except Exception as e:
-                self.log(f"[Team {team_number}] Unexpected error on attempt {attempt + 1}: {str(e)}")
-                if driver:
-                    try:
-                        driver.quit()
-                    except:
-                        pass
-                    driver = None
-                
-                if attempt < max_retries - 1:
-                    self.log(f"[Team {team_number}] Retrying in 5 seconds...")
-                    time.sleep(5)
-                else:
-                    self.log(f"[Team {team_number}] Failed after {max_retries} attempts")
-                    return team_name, ""
-        
-        return team_name, ""
-    
-    def process_games_sequential(self, driver, recent_links, team_name, team_code, team_number):
-        """Process individual games sequentially with optimized settings"""
-        all_box_scores = []
-        
-        for i, link in enumerate(recent_links, 1):
-            self.log(f"[Team {team_number}] Processing game {i}/5")
-            box_score_url = f"https://www.basketball-reference.com{link}"
+        try:
+            self.log(f"[Browser-{team_number}] Starting {team_name}")
             
-            # Retry logic for individual games
-            game_max_retries = 2
-            game_success = False
+            # Create ultra-optimized driver
+            driver = self.create_driver()
+            driver.set_page_load_timeout(15)
+            driver.implicitly_wait(3)
             
-            for game_attempt in range(game_max_retries):
+            # Get schedule page
+            schedule_url = f"https://www.basketball-reference.com/{league}/teams/{team_code}/{season}_games.html"
+            driver.get(schedule_url)
+            
+            # Quick wait
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
+            
+            # Parse and extract
+            soup = BeautifulSoup(driver.page_source, 'lxml')
+            box_score_links = self.ultra_fast_extract_links(soup)
+            
+            if not box_score_links:
+                return team_name, ""
+            
+            recent_links = box_score_links[-5:]
+            all_box_scores = []
+            
+            # Process games quickly
+            for i, link in enumerate(recent_links, 1):
                 try:
-                    if game_attempt > 0:
-                        self.log(f"[Team {team_number}] Retrying game {i}, attempt {game_attempt + 1}/{game_max_retries}")
-                    
-                    # Moderate delay between requests
-                    time.sleep(random.uniform(1, 2))
-                    
-                    # Navigate to box score page
+                    box_score_url = f"https://www.basketball-reference.com{link}"
                     driver.get(box_score_url)
-                    WebDriverWait(driver, 25).until(
+                    
+                    WebDriverWait(driver, 8).until(
                         EC.presence_of_element_located((By.TAG_NAME, "body"))
                     )
-                    time.sleep(2)  # Wait for content to load
                     
-                    box_score_soup = BeautifulSoup(driver.page_source, 'html.parser')
-                    box_score_data = self.extract_box_score_data(box_score_soup, team_name, team_code)
+                    game_soup = BeautifulSoup(driver.page_source, 'lxml')
+                    box_score_data = self.ultra_fast_extract_box_score(game_soup, team_name, team_code)
                     
                     if box_score_data:
                         all_box_scores.append(box_score_data)
-                        self.log(f"[Team {team_number}] ✓ Successfully processed game {i}")
-                        game_success = True
-                        break  # Success, exit retry loop
-                    else:
-                        self.log(f"[Team {team_number}] No data found for game {i} on attempt {game_attempt + 1}")
-                        if game_attempt < game_max_retries - 1:
-                            time.sleep(3)  # Wait before retry
-                            
+                        self.log(f"[Browser-{team_number}] ✓ Game {i}")
+                    
                 except Exception as e:
-                    self.log(f"[Team {team_number}] Error processing game {i}, attempt {game_attempt + 1}: {str(e)}")
-                    if game_attempt < game_max_retries - 1:
-                        time.sleep(3)  # Wait before retry
-                    else:
-                        self.log(f"[Team {team_number}] Failed to process game {i} after {game_max_retries} attempts")
+                    self.log(f"[Browser-{team_number}] Game {i} failed")
+                    continue
             
-            if not game_success:
-                self.log(f"[Team {team_number}] ⚠ Skipping game {i} after all retry attempts failed")
-        
-        return all_box_scores
-                
-    def extract_box_score_links(self, soup):
-        """Extract box score links from schedule page - optimized"""
-        links = []
-        
-        # More targeted search for box score links
-        schedule_table = soup.find('table', {'id': 'games'})
-        if schedule_table:
-            for link in schedule_table.find_all('a', href=True):
-                href = link.get('href')
-                if href and '/boxscores/' in href and href.endswith('.html'):
-                    links.append(href)
-        else:
-            # Fallback to original method
-            for link in soup.find_all('a', href=True):
-                href = link.get('href')
-                if href and '/boxscores/' in href and href.endswith('.html'):
-                    links.append(href)
-                    
-        return links
-        
-    def extract_box_score_data(self, soup, team_name, team_code):
-        """Extract box score data from a game page - optimized"""
-        try:
-            # Find the team's box score table with multiple attempts
-            possible_table_ids = [
-                f"box-{team_code}-game-basic",
-                f"box_{team_code}_basic",
-                f"box-{team_code.lower()}-game-basic",
-                f"box_{team_code.lower()}_basic"
-            ]
-            
-            table = None
-            for table_id in possible_table_ids:
-                table = soup.find('table', {'id': table_id})
-                if table:
-                    break
-                    
-            if not table:
-                # Try finding any table with the team code
-                for table_elem in soup.find_all('table'):
-                    if table_elem.get('id') and team_code.lower() in table_elem.get('id').lower():
-                        table = table_elem
-                        break
-                        
-            if not table:
-                return ""
-                
-            # Extract table data more efficiently
-            rows = table.find_all('tr')
-            if not rows:
-                return ""
-                
-            # Build output more efficiently
-            output_lines = [f"{team_name} Basic Box Score Stats"]
-            
-            for row in rows:
-                cells = row.find_all(['th', 'td'])
-                if cells:
-                    # Extract text more efficiently
-                    cell_texts = [cell.get_text(strip=True) for cell in cells]
-                    
-                    if cell_texts and any(cell_texts):  # Skip empty rows
-                        output_lines.append('\t'.join(cell_texts))
-                        
-            return '\n'.join(output_lines)
+            return team_name, "\n\n".join(all_box_scores)
             
         except Exception as e:
-            self.log(f"Error extracting box score data: {str(e)}")
-            return ""
+            self.log(f"[Browser-{team_number}] ❌ Error: {str(e)[:50]}...")
+            return team_name, ""
+        finally:
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
 
 def main():
     root = ctk.CTk()
-    app = BasketballBoxScoreScraper(root)
+    app = UltraFastBasketballScraper(root)
     root.mainloop()
 
 if __name__ == "__main__":
