@@ -582,9 +582,12 @@ class UltraFastBasketballScraper:
         self.root.after(50, self.process_log_queue)  # Faster log updates
         
     def update_progress(self, text):
-        """Update progress label"""
-        self.progress_label.configure(text=text)
-        self.root.update_idletasks()
+        """Update progress label safely from any thread"""
+        def _update():
+            self.progress_label.configure(text=text)
+            self.root.update_idletasks()
+
+        self.root.after(0, _update)
         
     def get_data_threaded(self):
         """Run data collection in a separate thread to prevent GUI freezing"""
